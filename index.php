@@ -28,7 +28,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($title !== '') {
 
-            // Si no se introduce fecha, guardamos NULL.
             $dueAt = $dueAt !== '' ? $dueAt : null;
 
             $stmt = $pdo->prepare(
@@ -50,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     /*
     |--------------------------------------------------------------------------
-    | COMPLETAR / DESCOMPLETAR TAREA
+    | COMPLETAR / DESCOMPLETAR
     |--------------------------------------------------------------------------
     */
 
@@ -80,7 +79,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if ($task['completed']) {
 
-                    // Descompletar
                     $stmt = $pdo->prepare(
                         "UPDATE tasks
                          SET completed = 0,
@@ -90,7 +88,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
                 } else {
 
-                    // Completar
                     $stmt = $pdo->prepare(
                         "UPDATE tasks
                          SET completed = 1,
@@ -148,9 +145,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 | OBTENER TAREAS PENDIENTES
 |--------------------------------------------------------------------------
 |
-| 1. Las que tienen fecha límite primero.
-| 2. La fecha límite más cercana primero.
-| 3. Las que no tienen fecha límite al final.
+| Las tareas con fecha aparecen primero y se ordenan
+| según cuál vence antes.
 |
 */
 
@@ -172,7 +168,7 @@ $pendingTasks = $stmt->fetchAll();
 | OBTENER TAREAS COMPLETADAS
 |--------------------------------------------------------------------------
 |
-| Las completadas más recientemente aparecen primero.
+| Las últimas completadas aparecen primero.
 |
 */
 
@@ -180,7 +176,7 @@ $stmt = $pdo->query(
     "SELECT *
      FROM tasks
      WHERE completed = 1
-     ORDER BY completed_at DESC"
+     ORDER BY completed_at DESC, updated_at DESC"
 );
 
 $completedTasks = $stmt->fetchAll();
@@ -213,11 +209,17 @@ $completedTasks = $stmt->fetchAll();
     <main>
 
         <h1>Task Manager</h1>
-
+        <button
+            type="button"
+            id="theme-toggle"
+            class="theme-toggle"
+            aria-label="Cambiar tema">
+            🌙 Dark mode
+        </button>
 
         <!-- =========================================================
-             CREAR TAREA
-        ========================================================== -->
+         CREAR TAREA
+    ========================================================== -->
 
         <section class="create-task">
 
@@ -230,7 +232,6 @@ $completedTasks = $stmt->fetchAll();
                     name="action"
                     value="create">
 
-
                 <div>
 
                     <label for="title">
@@ -242,6 +243,7 @@ $completedTasks = $stmt->fetchAll();
                         id="title"
                         name="title"
                         maxlength="255"
+                        placeholder="¿Qué necesitas hacer?"
                         required>
 
                 </div>
@@ -255,7 +257,8 @@ $completedTasks = $stmt->fetchAll();
 
                     <textarea
                         id="description"
-                        name="description"></textarea>
+                        name="description"
+                        placeholder="Añade una descripción..."></textarea>
 
                 </div>
 
@@ -284,13 +287,12 @@ $completedTasks = $stmt->fetchAll();
 
 
         <!-- =========================================================
-             TAREAS PENDIENTES
-        ========================================================== -->
+         TAREAS PENDIENTES
+    ========================================================== -->
 
         <section class="tasks">
 
             <h2>Tareas pendientes</h2>
-
 
             <?php if (empty($pendingTasks)): ?>
 
@@ -300,10 +302,46 @@ $completedTasks = $stmt->fetchAll();
 
             <?php else: ?>
 
-
                 <?php foreach ($pendingTasks as $task): ?>
 
-                    <article class="task">
+                    <?php
+
+                    /*
+                 * Determinar el estado visual de la tarea.
+                 *
+                 * Azul:
+                 * Sin fecha o más de 24 horas.
+                 *
+                 * Amarillo:
+                 * Menos de 24 horas para vencer.
+                 *
+                 * Rojo:
+                 * Fecha límite vencida.
+                 */
+
+                    $taskClass = 'task--normal';
+
+                    if (!empty($task['due_at'])) {
+
+                        $now = new DateTime();
+                        $dueDate = new DateTime($task['due_at']);
+
+                        $secondsRemaining =
+                            $dueDate->getTimestamp() - $now->getTimestamp();
+
+
+                        if ($secondsRemaining <= 0) {
+
+                            $taskClass = 'task--overdue';
+                        } elseif ($secondsRemaining <= 86400) {
+
+                            $taskClass = 'task--warning';
+                        }
+                    }
+
+                    ?>
+
+                    <article class="task <?= $taskClass ?>">
 
                         <h3>
                             <?= htmlspecialchars($task['title']) ?>
@@ -313,69 +351,86 @@ $completedTasks = $stmt->fetchAll();
                         <?php if (!empty($task['description'])): ?>
 
                             <p>
-                                <?= htmlspecialchars($task['description']) ?>
+                                <?= nl2br(
+                                    htmlspecialchars($task['description'])
+                                ) ?>
                             </p>
 
                         <?php endif; ?>
 
 
-                        <?php if ($task['due_at']): ?>
+                        <?php if (!empty($task['due_at'])): ?>
 
-                            <p>
+                            <p class="task-date">
+
                                 Fecha límite:
+
                                 <?= date(
                                     'd/m/Y H:i',
                                     strtotime($task['due_at'])
                                 ) ?>
+
                             </p>
 
                         <?php else: ?>
 
-                            <p>
+                            <p class="task-date">
                                 Sin fecha límite
                             </p>
 
                         <?php endif; ?>
 
 
-                        <form method="POST">
+                        <div class="task-actions">
 
-                            <input
-                                type="hidden"
-                                name="action"
-                                value="toggle">
+                            <!-- Completar -->
 
-                            <input
-                                type="hidden"
-                                name="id"
-                                value="<?= $task['id'] ?>">
+                            <form method="POST">
 
-                            <button type="submit">
-                                Completar
-                            </button>
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="toggle">
 
-                        </form>
+                                <input
+                                    type="hidden"
+                                    name="id"
+                                    value="<?= $task['id'] ?>">
+
+                                <button
+                                    type="submit"
+                                    class="btn-complete">
+                                    Completar
+                                </button>
+
+                            </form>
 
 
-                        <form
-                            method="POST"
-                            onsubmit="return confirm('¿Seguro que quieres eliminar esta tarea?');">
+                            <!-- Eliminar -->
 
-                            <input
-                                type="hidden"
-                                name="action"
-                                value="delete">
+                            <form
+                                method="POST"
+                                onsubmit="return confirm('¿Seguro que quieres eliminar esta tarea?');">
 
-                            <input
-                                type="hidden"
-                                name="id"
-                                value="<?= $task['id'] ?>">
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="delete">
 
-                            <button type="submit">
-                                Eliminar
-                            </button>
+                                <input
+                                    type="hidden"
+                                    name="id"
+                                    value="<?= $task['id'] ?>">
 
-                        </form>
+                                <button
+                                    type="submit"
+                                    class="btn-delete">
+                                    Eliminar
+                                </button>
+
+                            </form>
+
+                        </div>
 
                     </article>
 
@@ -387,13 +442,12 @@ $completedTasks = $stmt->fetchAll();
 
 
         <!-- =========================================================
-             TAREAS COMPLETADAS
-        ========================================================== -->
+         TAREAS COMPLETADAS
+    ========================================================== -->
 
         <section class="tasks completed-tasks">
 
             <h2>Tareas completadas</h2>
-
 
             <?php if (empty($completedTasks)): ?>
 
@@ -402,7 +456,6 @@ $completedTasks = $stmt->fetchAll();
                 </p>
 
             <?php else: ?>
-
 
                 <?php foreach ($completedTasks as $task): ?>
 
@@ -416,72 +469,100 @@ $completedTasks = $stmt->fetchAll();
                         <?php if (!empty($task['description'])): ?>
 
                             <p>
-                                <?= htmlspecialchars($task['description']) ?>
-                            </p>
-
-                        <?php endif; ?>
-
-
-                        <p>
-                            Completada el
-                            <?= date(
-                                'd/m/Y H:i',
-                                strtotime($task['completed_at'])
-                            ) ?>
-                        </p>
-
-
-                        <?php if ($task['due_at']): ?>
-
-                            <p>
-                                Fecha límite:
-                                <?= date(
-                                    'd/m/Y H:i',
-                                    strtotime($task['due_at'])
+                                <?= nl2br(
+                                    htmlspecialchars($task['description'])
                                 ) ?>
                             </p>
 
                         <?php endif; ?>
 
 
-                        <form method="POST">
+                        <p class="task-date">
 
-                            <input
-                                type="hidden"
-                                name="action"
-                                value="toggle">
+                            <?php if (!empty($task['completed_at'])): ?>
 
-                            <input
-                                type="hidden"
-                                name="id"
-                                value="<?= $task['id'] ?>">
+                                Completada el
 
-                            <button type="submit">
-                                Descompletar
-                            </button>
+                                <?= date(
+                                    'd/m/Y H:i',
+                                    strtotime($task['completed_at'])
+                                ) ?>
 
-                        </form>
+                            <?php else: ?>
+
+                                Completada
+
+                            <?php endif; ?>
+
+                        </p>
 
 
-                        <form
-                            method="POST"
-                            onsubmit="return confirm('¿Seguro que quieres eliminar esta tarea?');">
+                        <?php if (!empty($task['due_at'])): ?>
 
-                            <input
-                                type="hidden"
-                                name="action"
-                                value="delete">
+                            <p class="task-date">
 
-                            <input
-                                type="hidden"
-                                name="id"
-                                value="<?= $task['id'] ?>">
+                                Fecha límite:
 
-                            <button type="submit">
-                                Eliminar
-                            </button>
+                                <?= date(
+                                    'd/m/Y H:i',
+                                    strtotime($task['due_at'])
+                                ) ?>
 
-                        </form>
+                            </p>
+
+                        <?php endif; ?>
+
+
+                        <div class="task-actions">
+
+                            <!-- Descompletar -->
+
+                            <form method="POST">
+
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="toggle">
+
+                                <input
+                                    type="hidden"
+                                    name="id"
+                                    value="<?= $task['id'] ?>">
+
+                                <button
+                                    type="submit"
+                                    class="btn-complete">
+                                    Descompletar
+                                </button>
+
+                            </form>
+
+
+                            <!-- Eliminar -->
+
+                            <form
+                                method="POST"
+                                onsubmit="return confirm('¿Seguro que quieres eliminar esta tarea?');">
+
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="delete">
+
+                                <input
+                                    type="hidden"
+                                    name="id"
+                                    value="<?= $task['id'] ?>">
+
+                                <button
+                                    type="submit"
+                                    class="btn-delete">
+                                    Eliminar
+                                </button>
+
+                            </form>
+
+                        </div>
 
                     </article>
 
